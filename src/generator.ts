@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { FetchResult } from "./types.js";
+import { validateSkill } from "./validator.js";
 
 const SYSTEM_PROMPT = `You are an expert at writing OpenClaw SKILL.md files. Given source content about a tool, generate a well-structured SKILL.md. The description must include Use when: and NOT for: clauses.
 
@@ -20,17 +21,25 @@ description: >
 
 export async function generateSkillMd(fetchResult: FetchResult): Promise<string> {
   const client = new Anthropic();
+  const prompt = buildPrompt(fetchResult);
 
+  let result = await callClaude(client, prompt);
+
+  const validation = validateSkill(result);
+  if (!validation.valid) {
+    const retryPrompt = prompt + "\n\n## Validation Errors (fix these)\n" + validation.errors.map((e) => `- ${e}`).join("\n");
+    result = await callClaude(client, retryPrompt);
+  }
+
+  return result;
+}
+
+async function callClaude(client: Anthropic, prompt: string): Promise<string> {
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system: SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: buildPrompt(fetchResult),
-      },
-    ],
+    messages: [{ role: "user", content: prompt }],
   });
 
   const block = message.content[0];
